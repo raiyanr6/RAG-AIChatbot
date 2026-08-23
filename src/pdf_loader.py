@@ -12,6 +12,11 @@ def load_all_pdfs() -> list:
 
     pdf_files = sorted(DATA_DIR.glob("*.pdf"))
 
+    # ── TEMPORARY DEBUG — remove after confirming ──────────────────
+    print(f"  DATA_DIR resolved to: {DATA_DIR}")
+    print(f"  PDFs found: {[f.name for f in pdf_files]}")
+    # ───────────────────────────────────────────────────────────────
+
     if not pdf_files:
         raise FileNotFoundError(f"No PDF files found in {DATA_DIR}")
 

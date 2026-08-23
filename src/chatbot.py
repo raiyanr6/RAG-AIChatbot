@@ -57,34 +57,28 @@ def load_chatbot():
 
 
 def ask(chatbot: dict, question: str) -> dict:
-    """
-    Sends a question through the RAG pipeline and returns
-    the answer plus source metadata.
-    """
     if not question.strip():
         return {"answer": "Please enter a question.", "sources": [], "pages": []}
 
     chain     = chatbot["chain"]
     retriever = chatbot["retriever"]
 
-    # Get answer
-    answer = chain.invoke(question)
-
-    # Get source documents separately for citation display
+    answer   = chain.invoke(question)
     src_docs = retriever.invoke(question)
 
-    # Deduplicate sources while preserving order
-    seen    = set()
-    sources = []
-    pages   = []
-
+    # Collect all pages per source file
+    source_pages = {}
     for doc in src_docs:
-        source       = doc.metadata.get("source", "unknown")
-        page_display = doc.metadata.get("page", 0) + 1  # convert to 1-indexed
+        source = doc.metadata.get("source", "unknown")
+        page   = doc.metadata.get("page", 0) + 1
 
-        if (source, page_display) not in seen:
-            seen.add((source, page_display))
-            sources.append(source)
-            pages.append(page_display)
+        if source not in source_pages:
+            source_pages[source] = []
+        if page not in source_pages[source]:
+            source_pages[source].append(page)
+
+    # Build display lists
+    sources = list(source_pages.keys())
+    pages   = [sorted(source_pages[s]) for s in sources]
 
     return {"answer": answer, "sources": sources, "pages": pages}

@@ -82,8 +82,9 @@ if question:
 
         if sources:
             with st.expander("📄 Sources"):
-                for source, page in zip(sources, pages):
-                    st.caption(f"• {source} — page {page}")
+                for source, page_list in zip(sources, pages):
+                    pages_str = ", ".join(str(p) for p in page_list)
+                    st.caption(f"• {source} — pages {pages_str}")
 
     st.session_state.messages.append({
         "role"   : "assistant",

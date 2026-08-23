@@ -1,0 +1,29 @@
+# Virtual Environment
+Lib/
+Scripts/
+etc/
+include/
+share/
+pyvenv.cfg
+.venv/
+venv/
+
+# PyCharm
+.idea/
+
+# Environment
+.env
+*.cfg
+
+# Vector store
+chroma_db/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Misc
+.DS_Store
+*.log

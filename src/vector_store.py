@@ -42,11 +42,14 @@ def save_to_vector_store(chunks: list, embeddings: HuggingFaceEmbeddings) -> Chr
 
 def build_inmemory_vector_store(chunks: list, embeddings: HuggingFaceEmbeddings) -> Chroma:
     """
-    Embeds chunks and stores in RAM only — no disk writes.
-    Used for Streamlit Cloud deployment.
+    Embeds chunks and stores in RAM only.
+    Uses EphemeralClient explicitly for Streamlit Cloud compatibility.
     """
     if not chunks:
         raise ValueError("No chunks provided.")
+
+    import chromadb
+    client = chromadb.EphemeralClient()  # ✅ explicit in-memory client
 
     print(f"  Building in-memory Chroma with {len(chunks)} chunks...")
 
@@ -54,7 +57,7 @@ def build_inmemory_vector_store(chunks: list, embeddings: HuggingFaceEmbeddings)
         documents=chunks,
         embedding=embeddings,
         collection_name="lecture_notes",
-        # No persist_directory = stays in memory
+        client=client,               # ✅ pass client explicitly
     )
 
     print(f"  Done. Collection holds {vector_store._collection.count()} vectors.")

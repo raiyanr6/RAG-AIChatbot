@@ -4,16 +4,13 @@ src/llm.py
 
 import os
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from openai import OpenAI
 
 load_dotenv()
 
-LLM_MODEL   = "gpt-4o-mini"
+LLM_MODEL = "gpt-4o-mini"
 TEMPERATURE = 0
-MAX_TOKENS  = 512
+MAX_TOKENS = 512
 
 RAG_PROMPT_TEMPLATE = """
 You are a helpful teaching assistant for a university course called
@@ -33,7 +30,7 @@ Answer:
 """.strip()
 
 
-def get_llm():
+def _get_api_key() -> str:
     api_key = os.getenv("OPENAI_API_KEY")
 
     try:
@@ -47,39 +44,33 @@ def get_llm():
             "OPENAI_API_KEY not found.\n"
             "Add it to your .env file:  OPENAI_API_KEY=sk-..."
         )
-    llm = ChatOpenAI(
+    return api_key
+
+
+_client = OpenAI(api_key=_get_api_key())
+
+
+def format_chunks(chunks: list[dict]) -> str:
+    """Joins retrieved chunk texts into a single context string."""
+    return "\n\n".join(chunk["text"] for chunk in chunks)
+
+
+def generate_answer(question: str, chunks: list[dict]) -> str:
+    """
+    Generates an answer from the question + retrieved chunks.
+    Called directly by chatbot.py — no chain object, no retriever
+    passed in, since retrieval already happened before this is called.
+    """
+    context = format_chunks(chunks)
+
+    prompt = RAG_PROMPT_TEMPLATE.format(context=context, question=question)
+
+    response = _client.chat.completions.create(
         model=LLM_MODEL,
         temperature=TEMPERATURE,
         max_tokens=MAX_TOKENS,
-        api_key=api_key,
-    )
-    print(f"  LLM ready ({LLM_MODEL}, temperature={TEMPERATURE})")
-    return llm
-
-
-def format_docs(docs) -> str:
-    """Joins retrieved chunk texts into a single context string."""
-    return "\n\n".join(doc.page_content for doc in docs)
-
-
-def build_rag_chain(retriever):
-    llm = get_llm()
-
-    prompt = PromptTemplate(
-        template=RAG_PROMPT_TEMPLATE,
-        input_variables=["context", "question"],
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    # Modern LCEL chain — replaces the old RetrievalQA
-    chain = (
-        {
-            "context" : retriever | format_docs,
-            "question": RunnablePassthrough(),
-        }
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-
-    print("  RAG chain ready")
-    return chain
+    print(f"  Answer generated ({LLM_MODEL})")
+    return response.choices[0].message.content

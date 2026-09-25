@@ -13,15 +13,13 @@ What it does:
     1. Loads all PDFs from data/
     2. Filters out near-empty pages (title/divider slides)
     3. Splits pages into chunks
-    4. Loads the embedding model
-    5. Embeds chunks and saves to chroma_db/
+    4. Embeds chunks and upserts to Pinecone
 
 Do NOT import this file from app.py — it is a build step, not runtime code.
 """
 
 from src.pdf_loader import load_all_pdfs
 from src.chunker import split_documents
-from src.embedder import get_embedding_model
 from src.vector_store import save_to_vector_store
 
 # Pages with fewer characters than this are almost certainly
@@ -47,11 +45,11 @@ def main():
     print("\n=== RAG Ingestion Pipeline ===\n")
 
     # ── Step 1: Load PDFs ──────────────────────────────────────────────────────
-    print("[1/4] Loading PDFs...")
+    print("[1/3] Loading PDFs...")
     documents = load_all_pdfs()
 
     # ── Step 2: Filter + Chunk ─────────────────────────────────────────────────
-    print("\n[2/4] Filtering and chunking...")
+    print("\n[2/3] Filtering and chunking...")
     documents = filter_empty_pages(documents)
     chunks = split_documents(documents)
 
@@ -64,13 +62,9 @@ def main():
     print(f"  Preview: {sample.page_content[:200].strip()}...")
     print("----------------------------\n")
 
-    # ── Step 3: Load Embedding Model ───────────────────────────────────────────
-    print("[3/4] Loading embedding model...")
-    embeddings = get_embedding_model()
-
-    # ── Step 4: Embed + Save to Chroma ─────────────────────────────────────────
-    print("\n[4/4] Embedding chunks and saving to Chroma...")
-    save_to_vector_store(chunks, embeddings)
+    # ── Step 3: Embed + Upsert to Pinecone ────────────────────────────────────
+    print("[3/3] Embedding chunks and upserting to Pinecone...")
+    save_to_vector_store(chunks)
 
     print("\n=== Ingestion complete ✓ ===")
     print("You can now run:  streamlit run app.py\n")

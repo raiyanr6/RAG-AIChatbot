@@ -1,91 +1,78 @@
 """
 src/vector_store.py
 
-Two modes:
-  - save_to_vector_store()        → persists to disk   (local dev via ingest.py)
-  - build_inmemory_vector_store() → stays in RAM       (Streamlit Cloud deployment)
-  - load_vector_store()           → loads from disk    (local dev via app.py)
+Two functions:
+  - save_to_vector_store() → embeds chunks and upserts to Pinecone (called by ingest.py)
+  - get_vector_store()     → connects to the existing Pinecone index (called by app.py/chatbot.py)
+
+No local disk, no in-memory mode — Pinecone is persistent and hosted
 """
 
-from pathlib import Path
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+import os
+from pinecone import Pinecone, ServerlessSpec
+from src.embedder import embed_documents, EMBEDDING_DIM
 
-CHROMA_DIR = Path(__file__).resolve().parents[1] / "chroma_db"
+PINECONE_INDEX_NAME = "rag-lecture-notes"
 
-
-def save_to_vector_store(chunks: list, embeddings: HuggingFaceEmbeddings) -> Chroma:
-    """
-    Embeds chunks and persists to disk.
-    Called by ingest.py for local development.
-    """
-    if not chunks:
-        raise ValueError("No chunks provided.")
-
-    print(f"  Saving {len(chunks)} chunks to Chroma at: {CHROMA_DIR}")
-
-    if CHROMA_DIR.exists():
-        print("  Existing chroma_db found — clearing before rebuild...")
-        import shutil
-        shutil.rmtree(CHROMA_DIR)
-
-    vector_store = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=str(CHROMA_DIR),
-        collection_name="lecture_notes",
-    )
-
-    print(f"  Done. Collection holds {vector_store._collection.count()} vectors.")
-    return vector_store
+_pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
 
 
-def build_inmemory_vector_store(chunks: list, embeddings: HuggingFaceEmbeddings) -> Chroma:
-    """
-    Embeds chunks and stores in RAM only.
-    Uses EphemeralClient explicitly for Streamlit Cloud compatibility.
-    """
-    if not chunks:
-        raise ValueError("No chunks provided.")
-
-    import chromadb
-    client = chromadb.EphemeralClient()  # ✅ explicit in-memory client
-
-    print(f"  Building in-memory Chroma with {len(chunks)} chunks...")
-
-    vector_store = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        collection_name="lecture_notes",
-        client=client,               # ✅ pass client explicitly
-    )
-
-    print(f"  Done. Collection holds {vector_store._collection.count()} vectors.")
-    return vector_store
-
-
-def load_vector_store(embeddings: HuggingFaceEmbeddings) -> Chroma:
-    """
-    Loads a persisted Chroma store from disk.
-    Used locally — NOT used in Streamlit Cloud deployment.
-    """
-    if not CHROMA_DIR.exists():
-        raise FileNotFoundError(
-            f"chroma_db/ not found at {CHROMA_DIR}.\n"
-            "Run `python ingest.py` first to build the vector store."
+def _ensure_index_exists():
+    existing = [idx["name"] for idx in _pc.list_indexes()]
+    if PINECONE_INDEX_NAME not in existing:
+        print(f"  Index '{PINECONE_INDEX_NAME}' not found — creating...")
+        _pc.create_index(
+            name=PINECONE_INDEX_NAME,
+            dimension=EMBEDDING_DIM,
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
         )
+    else:
+        print(f"  Index '{PINECONE_INDEX_NAME}' already exists.")
 
-    print(f"  Loading Chroma store from: {CHROMA_DIR}")
 
-    vector_store = Chroma(
-        persist_directory=str(CHROMA_DIR),
-        embedding_function=embeddings,
-        collection_name="lecture_notes",
-    )
+def save_to_vector_store(chunks: list) -> None:
+    """
+    Embeds chunks and upserts them to Pinecone.
+    Called by ingest.py — the only place writes happen.
+    """
+    if not chunks:
+        raise ValueError("No chunks provided.")
 
-    count = vector_store._collection.count()
-    if count == 0:
-        raise ValueError("Chroma store is empty. Re-run `python ingest.py`.")
+    _ensure_index_exists()
+    index = _pc.Index(PINECONE_INDEX_NAME)
 
-    print(f"  Loaded. Collection holds {count} vectors.")
-    return vector_store
+    print(f"  Embedding {len(chunks)} chunks...")
+    texts = [chunk.page_content for chunk in chunks]
+    embeddings = embed_documents(texts)
+
+    print(f"  Upserting {len(chunks)} vectors to Pinecone...")
+    vectors = [
+        (
+            f"chunk_{i}",
+            embedding,
+            {
+                "text": chunk.page_content,
+                "source": chunk.metadata.get("source", "unknown"),
+                "page": chunk.metadata.get("page", -1),
+            },
+        )
+        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings))
+    ]
+
+    # Batch upserts — Pinecone recommends batches of ~100 to avoid oversized requests
+    batch_size = 100
+    for i in range(0, len(vectors), batch_size):
+        index.upsert(vectors=vectors[i : i + batch_size])
+
+    stats = index.describe_index_stats()
+    print(f"  Done. Index holds {stats['total_vector_count']} vectors.")
+
+
+def get_vector_store():
+    """
+    Connects to the existing Pinecone index — no embedding, no ingestion.
+    Called by chatbot.py/retriever.py at query time.
+    """
+    _ensure_index_exists()
+    return _pc.Index(PINECONE_INDEX_NAME)

@@ -1,46 +1,41 @@
 """
 src/retriever.py
-Loads the persisted Chroma vector store and retrieves relevant chunks.
-Used for local development only — deployment uses chatbot.py in-memory mode.
+Retrieves relevant chunks from Pinecone given a precomputed question embedding.
+Embedding happens in chatbot.py — this file only searches.
 """
 
-from langchain_chroma import Chroma
-from src.embedder import get_embedding_model
-from src.vector_store import load_vector_store
+from src.vector_store import get_vector_store
 
 TOP_K = 4
 
 
-def get_retriever():
+def retrieve_chunks(embedding: list[float]) -> list[dict]:
     """
-    Loads Chroma from disk and returns a retriever.
-    Only used locally (requires ingest.py to have been run).
+    Returns TOP_K most relevant chunks for a given question embedding.
+    Expects an already-computed embedding, not raw text — chatbot.py
+    is responsible for calling embed_text() first (shared with the
+    semantic cache check).
     """
-    embeddings   = get_embedding_model()
-    vector_store = load_vector_store(embeddings)
+    index = get_vector_store()
 
-    retriever = vector_store.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": TOP_K},
+    result = index.query(
+        vector=embedding,
+        top_k=TOP_K,
+        include_metadata=True,
     )
 
-    print(f"  Retriever ready (top_k={TOP_K})")
-    return retriever
+    chunks = [
+        {
+            "text": match["metadata"]["text"],
+            "source": match["metadata"].get("source", "unknown"),
+            "page": match["metadata"].get("page", "?"),
+            "score": match["score"],
+        }
+        for match in result["matches"]
+    ]
 
-
-def retrieve_chunks(question: str, retriever) -> list:
-    """
-    Returns TOP_K most relevant chunks for a given question.
-    """
-    if not question.strip():
-        raise ValueError("Question cannot be empty.")
-
-    chunks = retriever.invoke(question)
-
-    print(f"\n  Retrieved {len(chunks)} chunks for: '{question}'")
+    print(f"\n  Retrieved {len(chunks)} chunks:")
     for i, chunk in enumerate(chunks):
-        source = chunk.metadata.get("source", "unknown")
-        page   = chunk.metadata.get("page", "?")
-        print(f"    [{i+1}] {source} — page {page} ({len(chunk.page_content)} chars)")
+        print(f"    [{i+1}] {chunk['source']} — page {chunk['page']} (score: {chunk['score']:.4f})")
 
     return chunks
